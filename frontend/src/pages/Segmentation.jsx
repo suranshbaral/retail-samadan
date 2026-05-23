@@ -9,9 +9,10 @@ import {
   ScatterChart, Scatter, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell
 } from 'recharts'
+import { useAuth } from '../context/AuthContext'
 import { SkeletonCard, SkeletonChart } from '../components/Skeleton'
 
-const LOCATION_ID = '15e03030-c420-4ebd-a44a-59f5ef2f7608'
+
 
 // ─── Segment configs ──────────────────────────────────────────────────────────
 const SEGMENTS = {
@@ -297,6 +298,8 @@ export default function Segmentation() {
   const [loading, setLoading] = useState(true)
   const [days, setDays] = useState(30)
   const [view, setView] = useState('segments')
+  const { location } = useAuth()
+  const LOCATION_ID = location?.id
 
   async function load(d = days) {
     setLoading(true)

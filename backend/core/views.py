@@ -50,31 +50,31 @@ def to_decimal(value):
 class BusinessViewSet(viewsets.ModelViewSet):
     queryset = Business.objects.all()
     serializer_class = BusinessSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class LocationViewSet(viewsets.ModelViewSet):
     queryset = Location.objects.select_related("business").all()
     serializer_class = LocationSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class SupplierViewSet(viewsets.ModelViewSet):
     queryset = Supplier.objects.select_related("business").all()
     serializer_class = SupplierSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.select_related("business").all()
     serializer_class = CategorySerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -91,7 +91,7 @@ class PricebookItemViewSet(viewsets.ModelViewSet):
         "product", "location", "supplier", "category"
     ).all()
     serializer_class = PricebookItemSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -213,7 +213,7 @@ class PricebookItemViewSet(viewsets.ModelViewSet):
 class SaleTransactionViewSet(viewsets.ModelViewSet):
     queryset = SaleTransaction.objects.select_related("location").prefetch_related("line_items").all()
     serializer_class = SaleTransactionSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -230,7 +230,7 @@ class SaleLineItemViewSet(viewsets.ModelViewSet):
         "transaction", "product", "pricebook_item"
     ).all()
     serializer_class = SaleLineItemSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class PurchaseOrderViewSet(viewsets.ModelViewSet):
@@ -238,7 +238,7 @@ class PurchaseOrderViewSet(viewsets.ModelViewSet):
         "location", "supplier"
     ).prefetch_related("items").all()
     serializer_class = PurchaseOrderSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class PurchaseOrderItemViewSet(viewsets.ModelViewSet):
@@ -246,7 +246,7 @@ class PurchaseOrderItemViewSet(viewsets.ModelViewSet):
         "purchase_order", "product", "pricebook_item"
     ).all()
     serializer_class = PurchaseOrderItemSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class InventorySnapshotViewSet(viewsets.ModelViewSet):
@@ -254,7 +254,7 @@ class InventorySnapshotViewSet(viewsets.ModelViewSet):
         "location", "product", "pricebook_item"
     ).all()
     serializer_class = InventorySnapshotSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class ShrinkageAlertViewSet(viewsets.ModelViewSet):
@@ -262,7 +262,7 @@ class ShrinkageAlertViewSet(viewsets.ModelViewSet):
         "location", "product", "pricebook_item", "snapshot"
     ).all()
     serializer_class = ShrinkageAlertSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -280,7 +280,7 @@ class ShrinkageAlertViewSet(viewsets.ModelViewSet):
 
 class ImportUploadView(APIView):
     parser_classes = [MultiPartParser]
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         file = request.FILES.get("file")
@@ -345,7 +345,7 @@ class ImportUploadView(APIView):
 
 
 class ImportBatchListView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         location_id = request.query_params.get("location_id")
@@ -360,7 +360,7 @@ class ImportBatchListView(APIView):
 
 
 class ImportBatchDetailView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, batch_id):
         try:
@@ -380,7 +380,7 @@ class ImportBatchDetailView(APIView):
 
 
 class DashboardView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         location_id = request.query_params.get("location_id")
@@ -460,7 +460,7 @@ class DetectMappingView(APIView):
     POST /api/import/detect-mapping/
     Send a batch_id and get back AI-suggested column mapping.
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         batch_id = request.data.get('batch_id')
@@ -496,7 +496,7 @@ class DetectMappingView(APIView):
 
 
 class ConfirmMappingView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
         batch_id = request.data.get('batch_id')
@@ -554,7 +554,7 @@ class ExpectedInventoryView(APIView):
     GET /api/inventory/expected/?location_id=<id>
     Returns expected inventory for all products at a location.
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         location_id = request.query_params.get('location_id')
@@ -580,7 +580,7 @@ class RunAlertEngineView(APIView):
     GET /api/audit/run/?location_id=<id>
     Runs the alert engine and creates shrinkage alerts.
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         location_id = request.query_params.get('location_id')
@@ -622,7 +622,7 @@ class DemandForecastView(APIView):
     GET /api/forecast/?location_id=<id>
     Returns demand forecast for all products.
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         location_id = request.query_params.get('location_id')
@@ -656,7 +656,7 @@ class SegmentationView(APIView):
     GET /api/segmentation/?location_id=<id>&days=30
     Returns product segmentation — stars, cash cows, volume movers, dogs.
     """
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         location_id = request.query_params.get('location_id')
@@ -682,13 +682,24 @@ class SegmentationView(APIView):
 class EmployeeViewSet(viewsets.ModelViewSet):
     queryset = Employee.objects.all()
     serializer_class = EmployeeSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
+    def get_queryset(self):
+        user = self.request.user
+        business = Business.objects.filter(owner_email=user.email).first()
+        if business:
+            return Employee.objects.filter(business=business)
+        return Employee.objects.none()
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        business = Business.objects.filter(owner_email=user.email).first()
+        serializer.save(business=business)
 
 class ShiftViewSet(viewsets.ModelViewSet):
     queryset = Shift.objects.select_related('employee', 'location').all()
     serializer_class = ShiftSerializer
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -702,7 +713,7 @@ class ShiftViewSet(viewsets.ModelViewSet):
 
 
 class StaffingInsightsView(APIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
         location_id = request.query_params.get('location_id')

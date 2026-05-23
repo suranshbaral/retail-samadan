@@ -9,9 +9,10 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, BarChart, Bar, Cell
 } from 'recharts'
+import { useAuth } from '../context/AuthContext'
 import { SkeletonCard, SkeletonChart } from '../components/Skeleton'
 
-const LOCATION_ID = '15e03030-c420-4ebd-a44a-59f5ef2f7608'
+
 
 // ─── Animated Counter ─────────────────────────────────────────────────────────
 function AnimatedNumber({ value, prefix = '', suffix = '', decimals = 0 }) {
@@ -140,6 +141,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [days, setDays] = useState(30)
   const [mounted, setMounted] = useState(false)
+  const { location } = useAuth()
+  const LOCATION_ID = location?.id
 
   async function load(d = days) {
     setLoading(true)

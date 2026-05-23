@@ -5,9 +5,9 @@ import {
   TrendingUp, Search, Filter, RefreshCw, ArrowUpRight,
   ArrowDownRight, Minus, BarChart2, Zap
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 import { SkeletonRow } from '../components/Skeleton'
 
-const LOCATION_ID = '15e03030-c420-4ebd-a44a-59f5ef2f7608'
 
 // ─── Health indicator ─────────────────────────────────────────────────────────
 function HealthDot({ expected, reorderPoint = 0 }) {
@@ -56,6 +56,8 @@ export default function Inventory() {
   const [filter, setFilter] = useState('all')
   const [sortBy, setSortBy] = useState('expected')
   const [sortDir, setSortDir] = useState('asc')
+  const { location } = useAuth()
+  const LOCATION_ID = location?.id
 
   async function load() {
     setLoading(true)

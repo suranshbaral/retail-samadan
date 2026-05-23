@@ -6,8 +6,8 @@ import {
   ChevronUp, Zap, Database, TrendingUp, Package,
   ShoppingCart, X, Check, Info, Download
 } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 
-const LOCATION_ID = '15e03030-c420-4ebd-a44a-59f5ef2f7608'
 
 // ─── Import type configs ──────────────────────────────────────────────────────
 const IMPORT_TYPES = [
@@ -483,6 +483,9 @@ export default function Upload() {
   const [result, setResult] = useState(null)
   const [error, setError] = useState(null)
   const fileRef = useRef()
+  const { location } = useAuth()
+    const LOCATION_ID = location?.id
+
 
   function reset() {
     setStep(0); setImportType(null); setFile(null)

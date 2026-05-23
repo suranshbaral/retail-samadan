@@ -6,10 +6,11 @@ import {
   ChevronLeft, ChevronRight, Check, X, Zap
 } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { useAuth } from '../context/AuthContext'
 import { SkeletonChart, SkeletonCard } from '../components/Skeleton'
 
-const LOCATION_ID = '15e03030-c420-4ebd-a44a-59f5ef2f7608'
-const BUSINESS_ID = null // we'll get this from location
+
+
 
 const DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
 const DAY_LABELS = { monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', friday: 'Fri', saturday: 'Sat', sunday: 'Sun' }
@@ -56,7 +57,7 @@ function AddEmployeeModal({ onAdd, onClose }) {
 
   function handleSubmit() {
     if (!name.trim()) return
-    onAdd({ name: name.trim(), role, business: null })
+    onAdd({ name: name.trim(), role })
     onClose()
   }
 
@@ -287,8 +288,13 @@ export default function Staffing() {
   const [showAddEmployee, setShowAddEmployee] = useState(false)
   const [addShiftDay, setAddShiftDay] = useState(null)
   const [activeTab, setActiveTab] = useState('planner')
+  const { location, business } = useAuth()
+  const LOCATION_ID = location?.id
+  const BUSINESS_ID = business?.id
 
   async function load() {
+    if (!LOCATION_ID) return
+
     setLoading(true)
     try {
       const [insRes, empRes, shiftRes] = await Promise.all([
@@ -300,22 +306,38 @@ export default function Staffing() {
       setEmployees(empRes.data?.results || empRes.data || [])
       setShifts(shiftRes.data?.results || shiftRes.data || [])
     } catch (e) {
-      console.error(e)
+      console.error(e.response?.data || e)
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [weekStart])
+  useEffect(() => { load() }, [weekStart, LOCATION_ID])
 
-  async function handleAddEmployee(data) {
+ async function handleAddEmployee(data) {
+    if (!BUSINESS_ID) {
+      console.error('Missing business id')
+      return
+    }
+
     try {
-      const res = await createEmployee({ ...data, business: null })
-      setEmployees(prev => [...prev, res.data])
-    } catch (e) { console.error(e) }
-  }
+      const res = await createEmployee({
+        name: data.name,
+        role: data.role,
+        business: BUSINESS_ID,
+      })
 
+      setEmployees(prev => [...prev, res.data])
+    } catch (e) {
+      console.error(e.response?.data || e)
+    }
+  }
   async function handleAddShift(data) {
+    if (!LOCATION_ID) {
+      console.error('Missing location id')
+      return
+    }
+
     try {
       const res = await createShift({
         ...data,
@@ -323,7 +345,9 @@ export default function Staffing() {
         week_start: formatWeekStart(weekStart),
       })
       setShifts(prev => [...prev, res.data])
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      console.error(e.response?.data || e)
+    }
   }
 
   async function handleDeleteShift(id) {
