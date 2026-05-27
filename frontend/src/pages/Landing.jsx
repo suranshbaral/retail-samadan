@@ -76,25 +76,25 @@ export default function Landing() {
         html { scroll-behavior: smooth; }
         body { -webkit-font-smoothing: antialiased; }
 
-        :root {
-          --cream-0: #f5f2eb;
-          --cream-1: #ede9e0;
-          --cream-2: #e4dfd4;
-          --cream-3: #d8d2c4;
-          --ink-0: #1c1b17;
-          --ink-1: #3d3c36;
-          --ink-2: #6b6960;
-          --ink-3: #9b9890;
-          --ink-4: #c4c1b8;
-          --gold: #b07d3a;
-          --gold-hover: #c48d4a;
-          --gold-pale: rgba(176,125,58,0.08);
-          --gold-border: rgba(176,125,58,0.2);
-          --success: #1a7a52;
-          --danger: #b83a2a;
-          --shadow-card: 0 1px 3px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.05);
-          --shadow-lift: 0 4px 24px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
-        }
+      :root {
+          --cream-0: #f8f7ff;
+          --cream-1: #f0effe;
+          --cream-2: #e4e3f8;
+          --cream-3: #d4d3ef;
+          --ink-0: #0f0e1a;
+          --ink-1: #1e1d35;
+          --ink-2: #4a4a6a;
+          --ink-3: #7a7a9a;
+          --ink-4: #b0b0c8;
+          --gold: #6366f1;
+          --gold-hover: #4f52e0;
+          --gold-pale: rgba(99,102,241,0.08);
+          --gold-border: rgba(99,102,241,0.18);
+          --success: #10b981;
+          --danger: #ef4444;
+          --shadow-card: 0 1px 3px rgba(99,102,241,0.06), 0 4px 16px rgba(99,102,241,0.05);
+          --shadow-lift: 0 4px 24px rgba(99,102,241,0.12), 0 1px 4px rgba(99,102,241,0.06);
+          }
 
         .serif { font-family: 'Fraunces', Georgia, serif; }
 
@@ -124,13 +124,14 @@ export default function Landing() {
 
         .btn-gold {
           display:inline-block; padding:12px 26px;
-          background:var(--gold); border-radius:8px;
+          background: linear-gradient(135deg, #3b82f6, #6366f1);
+          border-radius:8px;
           color:#fff; font-size:14px; font-weight:600;
           text-decoration:none; letter-spacing:.01em;
-          transition: background .18s ease, transform .18s ease, box-shadow .18s ease;
+          transition: opacity .18s ease, transform .18s ease, box-shadow .18s ease;
           border:none; cursor:pointer; font-family:'DM Sans',sans-serif;
         }
-        .btn-gold:hover { background:var(--gold-hover); transform:translateY(-1px); box-shadow:0 6px 20px rgba(176,125,58,.28); }
+        .btn-gold:hover { opacity: 0.9; transform:translateY(-1px); box-shadow:0 6px 20px rgba(99,102,241,.35); }
 
         .btn-outline {
           display:inline-block; padding:12px 22px;
@@ -233,10 +234,20 @@ export default function Landing() {
             <h1 className="h1 serif" style={{ fontSize: 'clamp(50px,5.5vw,72px)', fontWeight: 500, letterSpacing: '-2.5px', lineHeight: 1.02, color: 'var(--ink-0)', marginBottom: '10px' }}>
               Your store,
             </h1>
-            <h1 className="h2 serif" style={{ fontSize: 'clamp(50px,5.5vw,72px)', fontWeight: 300, letterSpacing: '-2.5px', lineHeight: 1.02, color: 'var(--ink-2)', fontStyle: 'italic', marginBottom: '28px' }}>
-              finally legible.
-            </h1>
-
+            <h1 className="h2 serif" style={{
+                  fontSize: 'clamp(50px,5.5vw,72px)',
+                  fontWeight: 300,
+                  letterSpacing: '-2.5px',
+                  lineHeight: 1.02,
+                  fontStyle: 'italic',
+                  marginBottom: '28px',
+                  background: 'linear-gradient(135deg, #3b82f6, #6366f1, #8b5cf6)',
+                  WebkitBackgroundClip: 'text',
+                  WebkitTextFillColor: 'transparent',
+                  backgroundClip: 'text',
+                  }}>
+                  finally legible.
+              </h1>
             <p className="h3" style={{ fontSize: '17px', color: 'var(--ink-2)', lineHeight: 1.72, maxWidth: '400px', marginBottom: '36px', fontWeight: 400 }}>
               Upload your POS export. See which products are shrinking, what to reorder before the weekend, and whether you actually need two people on Tuesday.
             </p>
