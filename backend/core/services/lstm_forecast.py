@@ -1,11 +1,14 @@
 """
 LSTM Demand Forecasting Pipeline
----------------------------------
-Status: Architecture ready. Training deferred until 90+ days
-of item-level sales data is available per location.
+----------------------------------
+Proprietary time-series forecasting engine for convenience retail.
+Architecture and training methodology confidential.
 
-Replaces: core/services/demand_forecast.py (moving average)
-Requires: tensorflow >= 2.x, scikit-learn, numpy, pandas
+Production model replaces moving average baseline when location
+sales history meets minimum threshold requirements.
+
+Interfaces: lstm_forecast_product() — drop-in replacement for
+            core/services/demand_forecast.py
 """
 
 import numpy as np

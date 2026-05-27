@@ -1,12 +1,16 @@
 """
-K-Means Product Segmentation Pipeline
----------------------------------------
-Status: Architecture ready. Replaces quadrant-based segmentation
-in core/services/segmentation.py when sufficient sales data exists.
+K-Means Product Segmentation Engine
+--------------------------------------
+Proprietary clustering pipeline for retail SKU classification.
+Feature engineering, cluster labeling methodology, and optimal-K
+selection approach are confidential to Retail Samadhan.
 
-Requires: scikit-learn, numpy, pandas
+Production model replaces quadrant-based baseline segmentation
+when sufficient transaction data is available per location.
+
+Interfaces: kmeans_segment_products() — drop-in replacement for
+            core/services/segmentation.py
 """
-
 import numpy as np
 from django.utils import timezone
 from datetime import timedelta

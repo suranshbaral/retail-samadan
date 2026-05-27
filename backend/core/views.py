@@ -38,6 +38,8 @@ from .services.segmentation import segment_products
 from .models import Employee, Shift
 from .serializers import EmployeeSerializer, ShiftSerializer
 from .services.staffing import get_sales_by_day, get_sales_by_hour, get_staffing_recommendation
+from .services.kmeans_segmentation import kmeans_segment_products
+from .services.lstm_forecast import lstm_forecast_product
 
 
 def to_decimal(value):
@@ -730,3 +732,18 @@ class StaffingInsightsView(APIView):
             'sales_by_hour': get_sales_by_hour(location),
             'staffing_recommendation': get_staffing_recommendation(location),
         })
+
+class KMeansSegmentationView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        location_id = request.query_params.get('location_id')
+        days = int(request.query_params.get('days', 30))
+        if not location_id:
+            return Response({'error': 'location_id required'}, status=400)
+        try:
+            location = Location.objects.get(id=location_id)
+        except Location.DoesNotExist:
+            return Response({'error': 'Location not found'}, status=404)
+        result = kmeans_segment_products(location, days)
+        return Response({'location': location.name, **result})
