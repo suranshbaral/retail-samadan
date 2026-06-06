@@ -30,7 +30,13 @@ SECRET_KEY = 'django-insecure-!b&vyh2xzjp=h0@1c5#=8xm+s1+x-g*gxloi$rmhqq0y$_%o!!
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    'retailsamadhan.com',
+    'www.retailsamadhan.com',
+    '5.161.98.8',
+    'localhost',
+    '127.0.0.1',
+]
 
 
 # Application definition
@@ -178,3 +184,7 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_CREDENTIALS = True
+
+
+DATA_UPLOAD_MAX_MEMORY_SIZE = 2147483648
+FILE_UPLOAD_MAX_MEMORY_SIZE = 2147483648
