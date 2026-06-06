@@ -161,20 +161,49 @@ def detect_column_mapping(columns: list, sample_rows: list, import_type: str) ->
     if not columns:
         raise ValueError("No columns found in CSV")
 
-    # Keep prompt size reasonable for large POS/vendor exports,
-    # but still include enough columns for UPC/price fields that may appear later.
-    columns_sample = columns[:50]
-    sample_rows = sample_rows[:5]
+    # Limit columns sent to Claude so huge POS/pricebook exports do not create
+    # oversized prompts. Keep the full original rows in the database; only the
+    # AI prompt is limited and sanitized.
+    columns_to_map = columns[:25]
+
+    # Clean column names before sending them to Claude. Some vendor exports have
+    # symbols, quotes, or weird characters in headers that can confuse JSON output.
+    safe_columns = []
+    col_map = {}  # safe_name -> original_name
+
+    for index, col in enumerate(columns_to_map, start=1):
+        original_col = safe_str(col)
+        safe_col = re.sub(r"[^a-zA-Z0-9_\s]", "_", original_col).strip()
+        safe_col = re.sub(r"\s+", "_", safe_col)
+        safe_col = safe_col or f"column_{index}"
+
+        # Avoid collisions after sanitizing, e.g. "Cost($)" and "Cost %".
+        base_safe_col = safe_col
+        suffix = 2
+        while safe_col in col_map:
+            safe_col = f"{base_safe_col}_{suffix}"
+            suffix += 1
+
+        safe_columns.append(safe_col)
+        col_map[safe_col] = original_col
+
+    filtered_samples = []
+    for row in sample_rows[:3]:
+        filtered_row = {}
+        for safe_col, original_col in col_map.items():
+            if original_col in row:
+                filtered_row[safe_col] = row.get(original_col)
+        filtered_samples.append(filtered_row)
 
     prompt = f"""You are a data mapping assistant for a retail management system.
 
 I have a CSV file of type: {import_type.upper()}
 
-CSV Columns detected:
-{json.dumps(columns_sample, indent=2)}
+CSV Columns detected. IMPORTANT: use these exact sanitized column names as JSON keys:
+{json.dumps(safe_columns, indent=2)}
 
-Sample data (first 5 rows):
-{json.dumps(sample_rows, indent=2)}
+Sample data using those sanitized column names:
+{json.dumps(filtered_samples, indent=2, default=str)}
 
 I need to map these CSV columns to our system fields:
 {json.dumps(fields, indent=2)}
@@ -184,18 +213,20 @@ Rules:
 - A CSV column can only map to ONE system field
 - Not all CSV columns need to be mapped
 - Use null if a column doesn't match anything useful
+- Use only the sanitized CSV column names shown above as keys
 - Be smart about common POS export formats (Gilbarco, Verifone, NCR, Square, Clover, generic Excel)
 - Look at both column names AND sample data to make the best guess
 
-Respond ONLY with a JSON object in this exact format, no explanation:
+Respond ONLY with valid JSON. No markdown. No explanation.
+Use this exact format:
 {{
     "mapping": {{
-        "csv_column_name": "system_field_or_null"
+        "sanitized_csv_column_name": "system_field_or_null"
     }},
     "confidence": {{
-        "csv_column_name": 0.0
+        "sanitized_csv_column_name": 0.0
     }},
-    "unmapped": ["columns that dont match anything"],
+    "unmapped": ["sanitized columns that dont match anything"],
     "missing_required": ["required system fields not found in CSV"],
     "notes": "any important warnings"
 }}"""
@@ -203,11 +234,33 @@ Respond ONLY with a JSON object in this exact format, no explanation:
     message = client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=1024,
+        temperature=0,
         messages=[{"role": "user", "content": prompt}],
     )
 
     response_text = message.content[0].text if message.content else ""
-    return extract_json_object(response_text)
+    result = extract_json_object(response_text)
+
+    # Reverse sanitized column names back to the original CSV column names so
+    # apply_mapping() can read values from the real raw row keys.
+    if "mapping" in result and isinstance(result["mapping"], dict):
+        original_mapping = {}
+        for safe_col, field in result["mapping"].items():
+            original_col = col_map.get(safe_col, safe_col)
+            original_mapping[original_col] = field
+        result["mapping"] = original_mapping
+
+    if "confidence" in result and isinstance(result["confidence"], dict):
+        original_confidence = {}
+        for safe_col, confidence in result["confidence"].items():
+            original_col = col_map.get(safe_col, safe_col)
+            original_confidence[original_col] = confidence
+        result["confidence"] = original_confidence
+
+    if "unmapped" in result and isinstance(result["unmapped"], list):
+        result["unmapped"] = [col_map.get(col, col) for col in result["unmapped"]]
+
+    return result
 
 
 def apply_mapping(raw_rows: list, mapping: dict, import_type: str) -> list:
