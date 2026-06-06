@@ -150,7 +150,7 @@ def detect_column_mapping(columns: list, sample_rows: list, import_type: str) ->
     if not columns:
         raise ValueError("No columns found in CSV")
 
-    columns_to_map = columns[:25]
+    columns_to_map = columns[:35]
 
     safe_columns = []
     col_map = {}
