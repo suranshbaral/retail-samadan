@@ -1,12 +1,14 @@
-import json
 import csv
 import io
-from decimal import Decimal, InvalidOperation
+import json
+import re
+from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 import anthropic
-import pytz
 from django.conf import settings
+from django.db import transaction as db_transaction
 from django.utils import timezone
 
 from core.models import (
@@ -17,11 +19,19 @@ from core.models import (
     Location,
     SaleTransaction,
     SaleLineItem,
+    PurchaseOrder,
+    PurchaseOrderItem,
 )
 
-from core.models import PurchaseOrder, PurchaseOrderItem
-
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+
+def safe_str(value) -> str:
+    """Convert None/blank-ish values to a clean string safely."""
+    if value is None:
+        return ""
+    return str(value).strip().strip('"').strip()
+
 
 def read_csv_with_encoding(file) -> tuple:
     """
@@ -30,102 +40,123 @@ def read_csv_with_encoding(file) -> tuple:
     Returns (list of column names, list of row dicts)
     """
     raw = file.read()
-    
-    # Detect encoding from BOM or chardet
-    if raw[:2] == b'\xff\xfe':
-        encoding = 'utf-16-le'
-        raw = raw[2:]  # strip BOM
-    elif raw[:2] == b'\xfe\xff':
-        encoding = 'utf-16-be'
+
+    if raw[:2] == b"\xff\xfe":
+        encoding = "utf-16-le"
         raw = raw[2:]
-    elif raw[:3] == b'\xef\xbb\xbf':
-        encoding = 'utf-8-sig'
+    elif raw[:2] == b"\xfe\xff":
+        encoding = "utf-16-be"
+        raw = raw[2:]
+    elif raw[:3] == b"\xef\xbb\xbf":
+        encoding = "utf-8-sig"
     else:
         try:
             import chardet
+
             detected = chardet.detect(raw[:10000])
-            encoding = detected.get('encoding', 'utf-8') or 'utf-8'
+            encoding = detected.get("encoding") or "utf-8"
         except ImportError:
-            encoding = 'utf-8'
-    
-    # Decode
+            encoding = "utf-8"
+
     try:
-        content = raw.decode(encoding, errors='replace')
+        content = raw.decode(encoding, errors="replace")
     except (LookupError, UnicodeDecodeError):
-        content = raw.decode('utf-8', errors='replace')
-    
-    # Remove null bytes (common in UTF-16)
-    content = content.replace('\x00', '')
-    
-    # Parse CSV
+        content = raw.decode("utf-8", errors="replace")
+
+    content = content.replace("\x00", "")
+
     reader = csv.DictReader(io.StringIO(content))
-    columns = reader.fieldnames or []
+    original_columns = reader.fieldnames or []
     rows = [dict(row) for row in reader]
-    
-    # Clean column names
-    columns = [c.strip().strip('"').strip() for c in columns if c]
+
+    columns = [safe_str(col) for col in original_columns if safe_str(col)]
+
     clean_rows = []
     for row in rows:
-        clean_row = {k.strip().strip('"').strip(): v for k, v in row.items() if k}
+        clean_row = {}
+        for key, value in row.items():
+            clean_key = safe_str(key)
+            if clean_key:
+                clean_row[clean_key] = value
         clean_rows.append(clean_row)
-    
+
     return columns, clean_rows
 
 
 FIELD_DEFINITIONS = {
-    'sales': {
-        'date': 'Date or datetime of the sale (required)',
-        'upc': 'UPC or barcode of the product',
-        'product_name': 'Name or description of the product',
-        'quantity': 'Quantity sold',
-        'unit_price': 'Price per unit',
-        'total_amount': 'Total sale amount',
-        'transaction_ref': 'Transaction ID or reference number',
-        'tax': 'Tax amount',
+    "sales": {
+        "date": "Date or datetime of the sale (required)",
+        "upc": "UPC or barcode of the product",
+        "product_name": "Name or description of the product",
+        "quantity": "Quantity sold",
+        "unit_price": "Price per unit",
+        "total_amount": "Total sale amount",
+        "transaction_ref": "Transaction ID or reference number",
+        "tax": "Tax amount",
     },
-    'purchases': {
-        'date': 'Date of the purchase or invoice (required)',
-        'upc': 'UPC or barcode of the product',
-        'product_name': 'Name or description of the product',
-        'quantity_ordered': 'Quantity ordered',
-        'quantity_received': 'Quantity actually received',
-        'unit_cost': 'Cost per unit',
-        'total_cost': 'Total cost of the order',
-        'supplier': 'Supplier or vendor name',
-        'order_ref': 'Invoice or order reference number',
+    "purchases": {
+        "date": "Date of the purchase or invoice (required)",
+        "upc": "UPC or barcode of the product",
+        "product_name": "Name or description of the product",
+        "quantity_ordered": "Quantity ordered",
+        "quantity_received": "Quantity actually received",
+        "unit_cost": "Cost per unit",
+        "total_cost": "Total cost of the order",
+        "supplier": "Supplier or vendor name",
+        "order_ref": "Invoice or order reference number",
     },
-    'pricebook': {
-        'upc': 'UPC or barcode of the product (required)',
-        'product_name': 'Name or description of the product (required)',
-        'cost_price': 'Cost price / what you pay',
-        'sell_price': 'Sell price / retail price',
-        'category': 'Product category',
-        'supplier': 'Supplier or vendor name',
-        'tax_rate': 'Tax rate percentage',
-        'unit': 'Unit of measure (each, case, carton)',
-        'case_pack': 'Number of units per case',
+    "pricebook": {
+        "upc": "UPC or barcode of the product (required)",
+        "product_name": "Name or description of the product (required)",
+        "cost_price": "Cost price / what you pay",
+        "sell_price": "Sell price / retail price",
+        "category": "Product category",
+        "supplier": "Supplier or vendor name",
+        "tax_rate": "Tax rate percentage",
+        "unit": "Unit of measure (each, case, carton)",
+        "case_pack": "Number of units per case",
     },
-    'inventory': {
-        'upc': 'UPC or barcode of the product (required)',
-        'product_name': 'Name or description of the product',
-        'quantity': 'Current quantity on hand (required)',
-        'date': 'Date of the count',
-        'counted_by': 'Who counted it',
+    "inventory": {
+        "upc": "UPC or barcode of the product (required)",
+        "product_name": "Name or description of the product",
+        "quantity": "Current quantity on hand (required)",
+        "date": "Date of the count",
+        "counted_by": "Who counted it",
     },
 }
 
 
-def to_decimal(val):
+def to_decimal(value):
     try:
-        if val is None:
-            return Decimal('0')
-        return Decimal(str(val).replace('$', '').replace(',', '').strip())
+        text = safe_str(value).replace("$", "").replace(",", "")
+        if not text:
+            return Decimal("0")
+        return Decimal(text)
     except (InvalidOperation, ValueError):
-        return Decimal('0')
+        return Decimal("0")
+
+
+def extract_json_object(text: str) -> dict:
+    """Parse Claude JSON robustly even if it returns fenced JSON or tiny extra text."""
+    response_text = safe_str(text)
+
+    if response_text.startswith("```"):
+        response_text = re.sub(r"^```(?:json)?\s*", "", response_text, flags=re.IGNORECASE)
+        response_text = re.sub(r"\s*```$", "", response_text)
+
+    try:
+        return json.loads(response_text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", response_text, flags=re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise
 
 
 def detect_column_mapping(columns: list, sample_rows: list, import_type: str) -> dict:
     fields = FIELD_DEFINITIONS.get(import_type, {})
+    if not fields:
+        raise ValueError(f"Unsupported import_type: {import_type}")
 
     prompt = f"""You are a data mapping assistant for a retail management system.
 
@@ -154,7 +185,7 @@ Respond ONLY with a JSON object in this exact format, no explanation:
         "csv_column_name": "system_field_or_null"
     }},
     "confidence": {{
-        "csv_column_name": 0.0_to_1.0
+        "csv_column_name": 0.0
     }},
     "unmapped": ["columns that dont match anything"],
     "missing_required": ["required system fields not found in CSV"],
@@ -164,17 +195,11 @@ Respond ONLY with a JSON object in this exact format, no explanation:
     message = client.messages.create(
         model="claude-sonnet-4-5",
         max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}]
+        messages=[{"role": "user", "content": prompt}],
     )
 
-    response_text = message.content[0].text.strip()
-
-    if response_text.startswith('```'):
-        response_text = response_text.split('```')[1]
-        if response_text.startswith('json'):
-            response_text = response_text[4:]
-
-    return json.loads(response_text)
+    response_text = message.content[0].text if message.content else ""
+    return extract_json_object(response_text)
 
 
 def apply_mapping(raw_rows: list, mapping: dict, import_type: str) -> list:
@@ -182,14 +207,12 @@ def apply_mapping(raw_rows: list, mapping: dict, import_type: str) -> list:
 
     for row in raw_rows:
         mapped = {}
-
         for csv_col, system_field in mapping.items():
-            if system_field and system_field != 'null':
-                value = row.get(csv_col, '')
-
-                if value is not None and str(value).strip() != '':
-                    mapped[system_field] = str(value).strip()
-
+            if system_field and system_field != "null":
+                value = row.get(csv_col, "")
+                clean_value = safe_str(value)
+                if clean_value:
+                    mapped[system_field] = clean_value
         mapped_rows.append(mapped)
 
     return mapped_rows
@@ -202,252 +225,264 @@ def insert_pricebook_rows(mapped_rows: list, location: Location) -> dict:
     updated_pricebook_items = 0
     errors = []
 
-    for i, row in enumerate(mapped_rows):
+    for i, row in enumerate(mapped_rows, start=1):
         try:
-            upc = str(row.get('upc', '')).strip()
-            name = str(row.get('product_name', '')).strip()
+            with db_transaction.atomic():
+                upc = safe_str(row.get("upc"))
+                name = safe_str(row.get("product_name"))
 
-            if not upc or not name:
-                errors.append({'row': i + 1, 'error': 'Missing UPC or product name'})
-                continue
+                if not upc or not name:
+                    errors.append({"row": i, "error": "Missing UPC or product name"})
+                    continue
 
-            category = None
-            cat_name = str(row.get('category', '')).strip()
+                category = None
+                cat_name = safe_str(row.get("category"))
+                if cat_name:
+                    category, _ = Category.objects.get_or_create(name=cat_name)
 
-            if cat_name:
-                category, _ = Category.objects.get_or_create(name=cat_name)
+                product, product_created = Product.objects.update_or_create(
+                    upc=upc,
+                    defaults={"name": name},
+                )
+                if product_created:
+                    created_products += 1
+                else:
+                    updated_products += 1
 
-            product, product_created = Product.objects.update_or_create(
-                upc=upc,
-                defaults={
-                    'name': name,
-                }
-            )
+                supplier = None
+                sup_name = safe_str(row.get("supplier"))
+                if sup_name:
+                    supplier, _ = Supplier.objects.get_or_create(
+                        business=location.business,
+                        name=sup_name,
+                    )
 
-            if product_created:
-                created_products += 1
-            else:
-                updated_products += 1
-
-            supplier = None
-            sup_name = str(row.get('supplier', '')).strip()
-
-            if sup_name:
-                supplier, _ = Supplier.objects.get_or_create(
-                    business=location.business,
-                    name=sup_name
+                sell_price_value = (
+                    row.get("sell_price")
+                    or row.get("selling_price")
+                    or row.get("retail_price")
+                    or 0
                 )
 
-            sell_price_value = (
-                row.get('sell_price')
-                or row.get('selling_price')
-                or row.get('retail_price')
-                or 0
-            )
+                _, pricebook_created = PricebookItem.objects.update_or_create(
+                    location=location,
+                    product=product,
+                    defaults={
+                        "supplier": supplier,
+                        "category": category,
+                        "cost_price": to_decimal(row.get("cost_price", 0)),
+                        "sell_price": to_decimal(sell_price_value),
+                        "tax_rate": to_decimal(row.get("tax_rate", 0)),
+                        "is_active": True,
+                    },
+                )
+                if pricebook_created:
+                    created_pricebook_items += 1
+                else:
+                    updated_pricebook_items += 1
 
-            pricebook_item, pricebook_created = PricebookItem.objects.update_or_create(
-                location=location,
-                product=product,
-                defaults={
-                    'supplier': supplier,
-                    'category': category,
-                    'cost_price': to_decimal(row.get('cost_price', 0)),
-                    'sell_price': to_decimal(sell_price_value),
-                    'tax_rate': to_decimal(row.get('tax_rate', 0)),
-                    'is_active': True,
-                }
-            )
-
-            if pricebook_created:
-                created_pricebook_items += 1
-            else:
-                updated_pricebook_items += 1
-
-        except Exception as e:
-            errors.append({'row': i + 1, 'error': str(e)})
+        except Exception as exc:
+            errors.append({"row": i, "error": str(exc)})
 
     return {
-        'created_products': created_products,
-        'updated_products': updated_products,
-        'created_pricebook_items': created_pricebook_items,
-        'updated_pricebook_items': updated_pricebook_items,
-        'total_processed': len(mapped_rows),
-        'errors': errors,
+        "created_products": created_products,
+        "updated_products": updated_products,
+        "created_pricebook_items": created_pricebook_items,
+        "updated_pricebook_items": updated_pricebook_items,
+        "total_processed": len(mapped_rows),
+        "errors": errors,
     }
 
 
-def parse_date(val):
+def parse_date(value):
+    text = safe_str(value)
+    if not text:
+        raise ValueError("Missing date")
+
     formats = [
-        '%Y-%m-%d %H:%M:%S',
-        '%Y-%m-%dT%H:%M:%S',
-        '%m/%d/%Y %H:%M:%S',
-        '%m/%d/%Y %H:%M',
-        '%m/%d/%Y',
-        '%Y-%m-%d',
-        '%m-%d-%Y',
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%S",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%Y %H:%M",
+        "%m/%d/%Y",
+        "%Y-%m-%d",
+        "%m-%d-%Y",
     ]
 
     for fmt in formats:
         try:
-            return datetime.strptime(str(val).strip(), fmt)
+            return datetime.strptime(text, fmt)
         except ValueError:
             continue
 
-    raise ValueError(f"Cannot parse date: {val}")
+    raise ValueError(f"Cannot parse date: {value}")
 
 
-def insert_sales_rows(mapped_rows: list, location) -> dict:
+def make_aware_if_needed(dt):
+    if timezone.is_naive(dt):
+        return timezone.make_aware(dt)
+    return dt
+
+
+def insert_sales_rows(mapped_rows: list, location: Location) -> dict:
     created = 0
     errors = []
 
-    for i, row in enumerate(mapped_rows):
+    for i, row in enumerate(mapped_rows, start=1):
         try:
-            date_val = str(row.get('date', '')).strip()
+            with db_transaction.atomic():
+                date_val = safe_str(row.get("date"))
+                if not date_val:
+                    errors.append({"row": i, "error": "Missing date"})
+                    continue
 
-            if not date_val:
-                errors.append({'row': i + 1, 'error': 'Missing date'})
-                continue
+                sold_at = make_aware_if_needed(parse_date(date_val))
 
-            sold_at = parse_date(date_val)
+                qty = to_decimal(row.get("quantity", 1))
+                unit_price = to_decimal(row.get("unit_price", 0))
+                total = to_decimal(row.get("total_amount", 0))
+                if total == 0:
+                    total = qty * unit_price
 
-            if timezone.is_naive(sold_at):
-                sold_at = timezone.make_aware(sold_at)
+                upc = safe_str(row.get("upc"))
+                product_name = safe_str(row.get("product_name"))
 
-            qty = to_decimal(row.get('quantity', 1))
-            unit_price = to_decimal(row.get('unit_price', 0))
-            total = to_decimal(row.get('total_amount', 0)) or (qty * unit_price)
+                product = None
+                pricebook_item = None
 
-            upc = str(row.get('upc', '')).strip()
-            product_name = str(row.get('product_name', '')).strip()
+                if upc:
+                    product = Product.objects.filter(upc=upc).first()
+                if not product and product_name:
+                    product = Product.objects.filter(name__iexact=product_name).first()
+                if product:
+                    pricebook_item = PricebookItem.objects.filter(
+                        location=location,
+                        product=product,
+                    ).first()
 
-            product = None
-            pricebook_item = None
-
-            if upc:
-                product = Product.objects.filter(upc=upc).first()
-
-            if not product and product_name:
-                product = Product.objects.filter(name__iexact=product_name).first()
-
-            if product:
-                pricebook_item = PricebookItem.objects.filter(
+                sale_transaction = SaleTransaction.objects.create(
                     location=location,
-                    product=product
-                ).first()
+                    transaction_ref=safe_str(row.get("transaction_ref")),
+                    total_amount=total,
+                    total_tax=to_decimal(row.get("tax", 0)),
+                    sold_at=sold_at,
+                    source="csv",
+                )
 
-            transaction = SaleTransaction.objects.create(
-                location=location,
-                transaction_ref=str(row.get('transaction_ref', '')).strip(),
-                total_amount=total,
-                total_tax=to_decimal(row.get('tax', 0)),
-                sold_at=sold_at,
-                source='csv',
-            )
+                SaleLineItem.objects.create(
+                    transaction=sale_transaction,
+                    product=product,
+                    pricebook_item=pricebook_item,
+                    upc_raw=upc,
+                    product_name_raw=product_name,
+                    quantity=qty,
+                    unit_price=unit_price,
+                    cost_price=(
+                        pricebook_item.cost_price
+                        if pricebook_item
+                        else to_decimal(row.get("cost_price", 0))
+                    ),
+                    total_amount=total,
+                )
 
-            SaleLineItem.objects.create(
-                transaction=transaction,
-                product=product,
-                pricebook_item=pricebook_item,
-                upc_raw=upc,
-                product_name_raw=product_name,
-                quantity=qty,
-                unit_price=unit_price,
-                cost_price=pricebook_item.cost_price if pricebook_item else to_decimal(row.get('cost_price', 0)),
-                total_amount=total,
-            )
+                created += 1
 
-            created += 1
-
-        except Exception as e:
-            errors.append({'row': i + 1, 'error': str(e)})
+        except Exception as exc:
+            errors.append({"row": i, "error": str(exc)})
 
     return {
-        'created_transactions': created,
-        'total_processed': len(mapped_rows),
-        'errors': errors,
+        "created_transactions": created,
+        "total_processed": len(mapped_rows),
+        "errors": errors,
     }
 
-def insert_purchase_rows(mapped_rows: list, location) -> dict:
+
+def insert_purchase_rows(mapped_rows: list, location: Location) -> dict:
     """
     Insert mapped purchase/invoice rows into PurchaseOrder and PurchaseOrderItem.
     Groups rows by order_ref if available, otherwise one order per row.
+    Re-importing the same order_ref replaces its previous line items to avoid duplicates.
     """
     created_orders = 0
+    updated_orders = 0
     created_items = 0
     errors = []
 
-    # Group rows by order_ref so one invoice = one PurchaseOrder
-    from collections import defaultdict
     grouped = defaultdict(list)
-    for i, row in enumerate(mapped_rows):
-        ref = row.get('order_ref', '').strip() or f'AUTO-{i}'
+    for i, row in enumerate(mapped_rows, start=1):
+        ref = safe_str(row.get("order_ref")) or f"AUTO-{i}"
         grouped[ref].append((i, row))
 
     for order_ref, rows in grouped.items():
         try:
-            # Get date and supplier from first row in group
-            _, first_row = rows[0]
+            with db_transaction.atomic():
+                _, first_row = rows[0]
 
-            date_val = first_row.get('date', '').strip()
-            if not date_val:
-                for _, row in rows:
-                    errors.append({'row': 0, 'error': 'Missing date'})
-                continue
+                date_val = safe_str(first_row.get("date"))
+                if not date_val:
+                    for row_num, _ in rows:
+                        errors.append({"row": row_num, "error": "Missing date"})
+                    continue
 
-            ordered_at = parse_date(date_val)
-            if timezone.is_naive(ordered_at):
-                ordered_at = timezone.make_aware(ordered_at)
+                ordered_at = make_aware_if_needed(parse_date(date_val))
 
-            # Get or create supplier
-            supplier = None
-            sup_name = first_row.get('supplier', '').strip()
-            if sup_name:
-                supplier, _ = Supplier.objects.get_or_create(
-                    business=location.business,
-                    name=sup_name
+                supplier = None
+                sup_name = safe_str(first_row.get("supplier"))
+                if sup_name:
+                    supplier, _ = Supplier.objects.get_or_create(
+                        business=location.business,
+                        name=sup_name,
+                    )
+
+                order, order_created = PurchaseOrder.objects.get_or_create(
+                    location=location,
+                    order_ref=order_ref,
+                    defaults={
+                        "supplier": supplier,
+                        "ordered_at": ordered_at,
+                        "status": "received",
+                        "received_at": ordered_at,
+                    },
                 )
 
-            # Create purchase order
-            order, _ = PurchaseOrder.objects.get_or_create(
-                location=location,
-                order_ref=order_ref,
-                defaults={
-                    'supplier': supplier,
-                    'ordered_at': ordered_at,
-                    'status': 'received',
-                    'received_at': ordered_at,
-                }
-            )
-            created_orders += 1
+                if order_created:
+                    created_orders += 1
+                else:
+                    PurchaseOrder.objects.filter(pk=order.pk).update(
+                        supplier=supplier,
+                        ordered_at=ordered_at,
+                        status="received",
+                        received_at=ordered_at,
+                    )
+                    PurchaseOrderItem.objects.filter(purchase_order=order).delete()
+                    updated_orders += 1
 
-            # Create line items
-            for i, row in rows:
-                try:
-                    upc = row.get('upc', '').strip()
-                    product_name = row.get('product_name', '').strip()
+                for row_num, row in rows:
+                    upc = safe_str(row.get("upc"))
+                    product_name = safe_str(row.get("product_name"))
+
                     product = None
-
                     if upc:
                         product = Product.objects.filter(upc=upc).first()
                     if not product and product_name:
-                        product = Product.objects.filter(
-                            name__iexact=product_name
-                        ).first()
+                        product = Product.objects.filter(name__iexact=product_name).first()
 
                     if not product:
-                        # Create product if not found
                         if upc and product_name:
                             product, _ = Product.objects.get_or_create(
                                 upc=upc,
-                                defaults={'name': product_name}
+                                defaults={"name": product_name},
                             )
                         else:
-                            errors.append({'row': i, 'error': 'Cannot find or create product — missing UPC and name'})
+                            errors.append({
+                                "row": row_num,
+                                "error": "Cannot find or create product — missing UPC and name",
+                            })
                             continue
 
-                    qty_ordered = to_decimal(row.get('quantity_ordered') or row.get('quantity') or 0)
-                    qty_received = to_decimal(row.get('quantity_received') or qty_ordered)
-                    unit_cost = to_decimal(row.get('unit_cost') or row.get('cost_price') or 0)
+                    qty_ordered = to_decimal(row.get("quantity_ordered") or row.get("quantity") or 0)
+                    qty_received = to_decimal(row.get("quantity_received") or qty_ordered)
+                    unit_cost = to_decimal(row.get("unit_cost") or row.get("cost_price") or 0)
 
                     PurchaseOrderItem.objects.create(
                         purchase_order=order,
@@ -457,7 +492,6 @@ def insert_purchase_rows(mapped_rows: list, location) -> dict:
                         unit_cost=unit_cost,
                     )
 
-                    # Update pricebook cost price if we have better data
                     if unit_cost > 0:
                         PricebookItem.objects.filter(
                             location=location,
@@ -466,15 +500,13 @@ def insert_purchase_rows(mapped_rows: list, location) -> dict:
 
                     created_items += 1
 
-                except Exception as e:
-                    errors.append({'row': i, 'error': str(e)})
-
-        except Exception as e:
-            errors.append({'row': 0, 'error': f'Order {order_ref}: {str(e)}'})
+        except Exception as exc:
+            errors.append({"row": 0, "error": f"Order {order_ref}: {str(exc)}"})
 
     return {
-        'created_orders': created_orders,
-        'created_items': created_items,
-        'total_processed': len(mapped_rows),
-        'errors': errors,
+        "created_orders": created_orders,
+        "updated_orders": updated_orders,
+        "created_items": created_items,
+        "total_processed": len(mapped_rows),
+        "errors": errors,
     }
