@@ -202,7 +202,7 @@ Respond ONLY with a JSON object in this exact format, no explanation:
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=4096,
+        max_tokens=1024,
         messages=[{"role": "user", "content": prompt}],
     )
 
