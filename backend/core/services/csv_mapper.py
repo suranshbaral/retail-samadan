@@ -312,7 +312,6 @@ def insert_pricebook_rows(mapped_rows: list, location: Location) -> dict:
 
             if cat_name:
                 category, _ = Category.objects.get_or_create(
-                    business=location.business,
                     name=cat_name,
                 )
 

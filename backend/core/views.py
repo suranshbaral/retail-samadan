@@ -215,7 +215,6 @@ class PricebookItemViewSet(viewsets.ModelViewSet):
 
                 if category_name:
                     category, _ = Category.objects.get_or_create(
-                        business=location.business,
                         name=category_name,
                     )
 
