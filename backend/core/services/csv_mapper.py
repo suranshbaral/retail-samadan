@@ -158,15 +158,23 @@ def detect_column_mapping(columns: list, sample_rows: list, import_type: str) ->
     if not fields:
         raise ValueError(f"Unsupported import_type: {import_type}")
 
+    if not columns:
+        raise ValueError("No columns found in CSV")
+
+    # Keep prompt size reasonable for large POS/vendor exports,
+    # but still include enough columns for UPC/price fields that may appear later.
+    columns_sample = columns[:50]
+    sample_rows = sample_rows[:5]
+
     prompt = f"""You are a data mapping assistant for a retail management system.
 
 I have a CSV file of type: {import_type.upper()}
 
 CSV Columns detected:
-{json.dumps(columns, indent=2)}
+{json.dumps(columns_sample, indent=2)}
 
-Sample data (first 3 rows):
-{json.dumps(sample_rows[:3], indent=2)}
+Sample data (first 5 rows):
+{json.dumps(sample_rows, indent=2)}
 
 I need to map these CSV columns to our system fields:
 {json.dumps(fields, indent=2)}
@@ -194,7 +202,7 @@ Respond ONLY with a JSON object in this exact format, no explanation:
 
     message = client.messages.create(
         model="claude-sonnet-4-5",
-        max_tokens=1024,
+        max_tokens=4096,
         messages=[{"role": "user", "content": prompt}],
     )
 
