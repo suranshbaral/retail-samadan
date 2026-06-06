@@ -1,4 +1,6 @@
 import json
+import csv
+import io
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
 
@@ -20,6 +22,54 @@ from core.models import (
 from core.models import PurchaseOrder, PurchaseOrderItem
 
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+def read_csv_with_encoding(file) -> tuple:
+    """
+    Read a CSV file with automatic encoding detection.
+    Handles UTF-8, UTF-16, UTF-16-LE, Latin-1 and more.
+    Returns (list of column names, list of row dicts)
+    """
+    raw = file.read()
+    
+    # Detect encoding from BOM or chardet
+    if raw[:2] == b'\xff\xfe':
+        encoding = 'utf-16-le'
+        raw = raw[2:]  # strip BOM
+    elif raw[:2] == b'\xfe\xff':
+        encoding = 'utf-16-be'
+        raw = raw[2:]
+    elif raw[:3] == b'\xef\xbb\xbf':
+        encoding = 'utf-8-sig'
+    else:
+        try:
+            import chardet
+            detected = chardet.detect(raw[:10000])
+            encoding = detected.get('encoding', 'utf-8') or 'utf-8'
+        except ImportError:
+            encoding = 'utf-8'
+    
+    # Decode
+    try:
+        content = raw.decode(encoding, errors='replace')
+    except (LookupError, UnicodeDecodeError):
+        content = raw.decode('utf-8', errors='replace')
+    
+    # Remove null bytes (common in UTF-16)
+    content = content.replace('\x00', '')
+    
+    # Parse CSV
+    reader = csv.DictReader(io.StringIO(content))
+    columns = reader.fieldnames or []
+    rows = [dict(row) for row in reader]
+    
+    # Clean column names
+    columns = [c.strip().strip('"').strip() for c in columns if c]
+    clean_rows = []
+    for row in rows:
+        clean_row = {k.strip().strip('"').strip(): v for k, v in row.items() if k}
+        clean_rows.append(clean_row)
+    
+    return columns, clean_rows
 
 
 FIELD_DEFINITIONS = {

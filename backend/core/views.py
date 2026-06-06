@@ -42,6 +42,53 @@ from .services.kmeans_segmentation import kmeans_segment_products
 from .services.lstm_forecast import lstm_forecast_product
 
 
+
+def read_csv_with_encoding(file):
+    """
+    Read CSV uploads safely across common encodings including UTF-8 BOM,
+    UTF-16, UTF-16 little-endian/big-endian, and fallback encodings.
+    Returns: (columns, rows)
+    """
+    raw = file.read()
+
+    if raw[:2] == b'\xff\xfe':
+        encoding = "utf-16-le"
+        raw = raw[2:]
+    elif raw[:2] == b'\xfe\xff':
+        encoding = "utf-16-be"
+        raw = raw[2:]
+    elif raw[:3] == b'\xef\xbb\xbf':
+        encoding = "utf-8-sig"
+    else:
+        try:
+            import chardet
+            detected = chardet.detect(raw[:10000])
+            encoding = detected.get("encoding", "utf-8") or "utf-8"
+        except Exception:
+            encoding = "utf-8"
+
+    try:
+        text = raw.decode(encoding, errors="replace")
+    except Exception:
+        text = raw.decode("utf-8", errors="replace")
+
+    text = text.replace("\x00", "")
+
+    reader = csv.DictReader(io.StringIO(text))
+    columns = [c.strip().strip('"').strip() for c in (reader.fieldnames or []) if c]
+
+    rows = []
+    for row in reader:
+        clean_row = {
+            k.strip().strip('"').strip(): v
+            for k, v in row.items()
+            if k
+        }
+        rows.append(clean_row)
+
+    return columns, rows
+
+
 def to_decimal(value):
     try:
         return Decimal(str(value).replace("$", "").replace(",", "").strip())
@@ -116,8 +163,8 @@ class PricebookItemViewSet(viewsets.ModelViewSet):
             return Response({"error": "Location not found"}, status=404)
 
         csv_file = data["file"]
-        decoded = csv_file.read().decode("utf-8-sig")
-        reader = csv.DictReader(io.StringIO(decoded))
+        columns, rows = read_csv_with_encoding(csv_file)
+        reader = iter(rows)
 
         rows_total = 0
         rows_imported = 0
@@ -307,9 +354,7 @@ class ImportUploadView(APIView):
             return Response({"error": "Location not found"}, status=404)
 
         try:
-            decoded = file.read().decode("utf-8-sig")
-            reader = csv.DictReader(io.StringIO(decoded))
-            rows = list(reader)
+            columns, rows = read_csv_with_encoding(file)
         except Exception as e:
             return Response({"error": f"Could not parse CSV: {str(e)}"}, status=400)
 
